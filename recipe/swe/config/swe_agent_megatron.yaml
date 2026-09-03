@@ -1,0 +1,120 @@
+hydra:
+  searchpath:
+    - file://${oc.env:VERL_ROOT}/verl/trainer/config
+
+defaults:
+  - ppo_megatron_trainer
+  - _self_
+
+trainer:
+  # Directory for logging rollout data; no dump if null
+  rollout_data_dir: null
+  # Directory for logging validation data; no dump if null
+  validation_data_dir: null
+  # Per-step SWE trajectory diagnostics. Enabled by default; set enable=false
+  # to disable extra TQ reads, console output, tracker metrics, and JSON writes.
+  swe_step_diagnostics:
+    enable: true
+    console: true
+    tracker: true
+    write_json: true
+    # null -> ${trainer.default_local_dir}/step_diagnostics
+    json_dir: null
+    max_examples_per_outcome: 3
+
+
+data:
+  max_prompt_length: 1024
+  max_response_length: 1024
+  train_batch_size: 256
+  val_batch_size: 256
+  return_raw_chat: True
+
+agent:
+  num_workers: 128
+
+actor_rollout_ref:
+  hybrid_engine: True
+  rollout:
+    name: sglang
+    multi_turn:
+      enable: True
+      max_assistant_turns: 30
+      format: hermes
+  swe_custom_config:
+    server_url: "http://localhost:5000"
+    sparse_reward: True
+    max_completion_tokens: 2048
+    agent_config_path: ${oc.env:CANOPY_ROOT}/recipe/swe/config/swe_agent_xml_config.yaml
+    env_config_path: ${oc.env:CANOPY_ROOT}/recipe/swe/config/swe_env_config.yaml
+    use_tool_call: False
+    enable_thinking: False
+    env_start_timeout: 60
+    action_execute_timeout: 120
+    eval_timeout: 300
+    # Official SWE-bench Pro permits 3600s. Training scripts may lower this
+    # for online checkpoint monitoring and restore 3600s for final evaluation.
+    swe_bench_pro_eval_timeout: 3600
+    # Model interaction/rollout only. Docker evaluation has its own timeout.
+    # The same limit applies to training and validation.
+    max_rollout_trajectory_timeout: 4800
+    eval_env_start_timeout: 60
+    max_env_start_sleep_seconds: 25
+    max_env_timeout_cnt: 3
+    # Repeated command+unchanged-result guard, shared by training and validation.
+    # Set the termination threshold to 0 to disable it.
+    repeated_action_warning_threshold: 0
+    repeated_action_termination_threshold: 0
+    default_timeout_reward_score: -0.2
+    default_no_patch_reward_score: -0.2
+    default_apply_patch_failed_reward_score: -0.2
+    default_terminated_reward_score: 0
+    default_no_eval_reward_score: 0
+    env_resource_tokens: 5
+    env_cpu_limit: "4"
+    env_mem_limit: "8g"
+    ray_env_actor_num_cpus: 1.0
+    # Per-node online Podman cleanup. Disabled by default for backwards
+    # compatibility. When enabled, TaskRunner creates exactly one GC queue per
+    # Ray group node; deletion concurrency is intentionally restricted to 1-2.
+    container_gc_enabled: False
+    container_gc_workers_per_node: 1
+    container_gc_queue_maxsize: 4096
+    container_gc_remove_timeout_seconds: 120
+    container_gc_max_retries: 3
+    container_gc_retry_backoff_seconds: 2
+    container_gc_enqueue_timeout_seconds: 5
+    container_gc_drain_timeout_seconds: 180
+    # Optional public dependency mirrors for disposable task containers.
+    # This does not change network_mode; egress requires a separate, explicit
+    # bridge/custom-network opt-in on dedicated workers.
+    dependency_mirror_enabled: False
+    dependency_mirror_apt_enabled: True
+    dependency_mirror_python_enabled: True
+    dependency_mirror_go_enabled: True
+    dependency_mirror_node_enabled: False
+    dependency_mirror_php_enabled: True
+    dependency_mirror_r_enabled: True
+    dependency_mirror_ruby_enabled: True
+    dependency_mirror_jvm_enabled: True
+    dependency_mirror_cargo_enabled: True
+    dependency_mirror_rustup_enabled: False
+    enable_lxcfs_cpu_view: True
+    use_sparse_reward: True
+    reset_git_log: True
+    map_testbed_to_tmpfs: False
+    drop_action_parse_failed_assistant_message: False
+    # Default-off compatibility gate for task-only, message-aware initial prompt truncation.
+    enable_message_aware_prompt_truncation: False
+    disable_manual_write_patch_cmd: True
+    strip_thinking_for_action_parse: True
+
+  actor:
+    megatron:
+      vanilla_mbridge: False
+      use_mbridge: True
+
+  ref:
+    megatron:
+      vanilla_mbridge: False
+      use_mbridge: True

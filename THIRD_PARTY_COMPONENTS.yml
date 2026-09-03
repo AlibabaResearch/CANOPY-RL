@@ -1,0 +1,154 @@
+schema_version: 1
+project:
+  name: CANOPY
+  license: Apache-2.0
+
+components:
+  - name: verl
+    role: tested training-framework package source and trainer-derived entry point
+    source: https://github.com/verl-project/verl.git
+    revision: 19c6af5de10de2b5272c83c0e82aa715c8c621f3
+    version: v0.8.0-11-g19c6af5d
+    license: Apache-2.0
+    bundled_source: modified-package-source-snapshot
+    distributed_paths:
+      - verl/
+      - patches/verl-canopy.patch
+      - recipe/swe/main_ppo_sync.py
+      - recipe/swe/hermes_tool_parser.py
+      - tests/utils/megatron/test_router_replay_live_registry_on_cpu.py
+      - tests/utils/test_net_utils.py
+    license_files:
+      - THIRD_PARTY_LICENSES/verl/LICENSE
+      - THIRD_PARTY_LICENSES/verl/Notice.txt
+    modified: true
+    modification_summary: >-
+      Registers CANOPY agent loops, forwards validation state, adds a chat stop
+      token, supports nested model-config dictionaries, rebuilds and validates
+      the live R2 router registry, reserves deterministic SGLang NCCL ports,
+      aligns the TransferQueue hint, and records the project runtime
+      environment. The patch records nine content-modified files under verl/
+      plus one normalized pathname whose upstream name ended in U+200E.
+      recipe/swe/main_ppo_sync.py is separately distributed as a modified copy
+      of the same-revision synchronous trainer entry point, with SWE trajectory
+      diagnostics, dense/nested dump handling, optional container-GC lifecycle
+      management, and report persistence. The strict Hermes parser is adapted
+      from verl's Apache-2.0 tool parser. Two focused tests cover the added R2
+      registry and port-reservation behavior.
+    notes: >-
+      The bundled package-source snapshot is the audited paper-command
+      source-layout reference, not a complete upstream repository checkout or
+      an end-to-end result-reproduction guarantee. Recipe ports to another exact
+      verl revision are best-effort and require separate compatibility testing.
+
+  - name: PyTorch copied portions
+    role: code copied by upstream verl for distributed checkpoint state handling
+    source: https://github.com/pytorch/pytorch.git
+    revision: v2.7.0
+    license: BSD-3-Clause
+    bundled_source: partial-unmodified-by-canopy
+    distributed_paths:
+      - verl/third_party/torch/
+    license_files:
+      - THIRD_PARTY_LICENSES/PyTorch/LICENSE
+    modified: false
+    notes: >-
+      These files are part of the tested upstream verl snapshot. Their existing
+      copyright and license headers are retained.
+
+  - name: AppWorld
+    role: external benchmark interface and source base for the paper prompt
+    source: https://github.com/StonyBrookNLP/appworld.git
+    revision: ba33afb327152803956fdc16f2c3b94a88377453
+    observed_version: 0.2.0.dev0
+    license: Apache-2.0
+    bundled_source: partial-modified
+    distributed_paths:
+      - recipe/appworld/env_server/prompts.py
+    license_files:
+      - THIRD_PARTY_LICENSES/AppWorld/LICENSE
+      - THIRD_PARTY_LICENSES/AppWorld/NOTICE.md
+    modified: true
+    modification_summary: >-
+      Bundles AppWorld's public legacy ReAct code-agent instructions. CANOPY
+      removes the final Task: {{ input_str }} line because the environment
+      service sends each actual task as a separate user message, and adds an
+      optional local prompt-file override.
+    notes: >-
+      CANOPY calls the public AppWorld Python API and redistributes only the
+      attributed public prompt described above. No protected task/API data,
+      database, evaluator, split Parquet, or generated derivative is distributed.
+
+  - name: mini-swe-agent
+    role: source-code base for selected SWE action, environment, configuration, and prompt files
+    source: https://github.com/SWE-agent/mini-swe-agent.git
+    revision: e68906fa7cd9f859b1cf483b685284285a379865
+    version: v2.2.6
+    license: MIT
+    bundled_source: partial-modified
+    distributed_paths:
+      - recipe/swe/env_server/actions_text.py
+      - recipe/swe/env_server/actions_toolcall.py
+      - recipe/swe/env_server/config.py
+      - recipe/swe/env_server/environments.py
+      - recipe/swe/env_server/exceptions.py
+      - recipe/swe/config/swe_agent_qwen35_9b_native_toolcall_nothink.yaml
+      - recipe/swe/config/swe_agent_qwen3_native_toolcall_nothink.yaml
+      - recipe/swe/config/swe_agent_qwen3_native_toolcall_think.yaml
+      - recipe/swe/config/swe_agent_xml_config.yaml
+      - recipe/swe/config/swe_agent_xml_config_nothink.yaml
+    license_files:
+      - THIRD_PARTY_LICENSES/mini-swe-agent/LICENSE.md
+    modified: true
+    modification_summary: >-
+      Adapts imports, container execution, configuration, prompt formats, and
+      message/tool-call representations to CANOPY and verl; adds resource and
+      parsing safeguards, diagnostics, fallback identifiers, and an optional
+      public dependency-mirror integration; and omits the upstream multimodal
+      expansion path.
+
+  - name: SWE-bench
+    role: source-code base for grading and test-spec integration
+    source: https://github.com/swe-bench/SWE-bench.git
+    revision: 726c5461e2ef52d83cf1ea2107870a8bb3328d57
+    version: v4.1.0
+    license: MIT
+    bundled_source: partial-modified
+    distributed_paths:
+      - recipe/swe/env_server/evaluate.py
+      - recipe/swe/env_server/test_spec.py
+    license_files:
+      - THIRD_PARTY_LICENSES/SWE-bench/LICENSE
+    modified: true
+    modification_summary: >-
+      Adds the runtime fork's install configuration, parser registry, error
+      diagnostics, dense-reward calculation, additional report fields, and
+      CANOPY-specific TestSpec construction.
+
+  - name: SWE-rebench-SWE-bench-fork
+    role: external SWE-bench runtime interface used by the retained recipes
+    source: https://github.com/SWE-rebench/SWE-bench-fork.git
+    revision: 71aaff544c63b57943056b05a43271afc475e7b7
+    observed_version: 4.0.3
+    license: MIT
+    bundled_source: false
+    distributed_paths: []
+    license_files:
+      - THIRD_PARTY_LICENSES/SWE-bench/LICENSE
+    modified: false
+    notes: >-
+      This fork supplies fields and parser interfaces used by the local grading
+      integration. It is an external prerequisite and is not copied wholesale
+      into CANOPY.
+
+runtime_environment:
+  install_manifest_distributed: false
+  packages_bundled: false
+  tested_environment_record: docs/TESTED_ENVIRONMENT.md
+  provisioned_by: operator
+  sca_scope: >-
+    Release SCA covers all source tracked in this commit, including the bundled
+    verl package source, CANOPY patch, and listed third-party-derived files. It
+    does not resolve or assess packages installed in an operator-selected
+    Python, accelerator, benchmark, or container environment; that environment
+    must be scanned separately.

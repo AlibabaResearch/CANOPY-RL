@@ -9,6 +9,10 @@ for Long-Horizon Interactive Agents”](https://arxiv.org/abs/2609.01245)
 (arXiv:2609.01245) and currently covers AppWorld and SWE-style software
 engineering environments.
 
+In February 2026, CANOPY with Qwen3-14B achieved state of the art on the public
+AppWorld leaderboard (<https://appworld.dev/appworld/leaderboard>; since
+surpassed by newer closed-source models).
+
 This is a source release for an existing multi-node Verl/Ray/GPU stack. It is
 not a standalone Python package or a single-machine quickstart.
 

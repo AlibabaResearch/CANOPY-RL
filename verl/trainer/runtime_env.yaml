@@ -1,0 +1,11 @@
+# Canopy modification: runtime environment used by the bundled multi-node jobs.
+working_dir: ./
+excludes: ["/.git/", "/.github/", "/outputs/", "/logs/"]
+env_vars:
+  TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN: "1"
+  NCCL_DEBUG: "INFO"
+  HYDRA_FULL_ERROR: "1"
+  HCCL_HOST_SOCKET_PORT_RANGE: "auto"
+  HCCL_NPU_SOCKET_PORT_RANGE: "auto"

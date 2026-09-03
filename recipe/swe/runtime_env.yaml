@@ -1,0 +1,24 @@
+# Runtime environment for the bundled tested layout, or a manually constructed
+# port where the active Verl checkout also contains the CANOPY recipe sources.
+# Retained launchers submit their repository root as the Ray working directory,
+# so `./` refers to the staged CANOPY tree.
+working_dir: ./
+excludes:
+  - "/.git/"
+  - "/.github/"
+  - "/outputs/"
+  - "/logs/"
+  - "/runtime/"
+env_vars:
+  # Ray changes the job cwd to the staged working directory.
+  CANOPY_ROOT: "."
+  VERL_ROOT: "."
+  RAY_SCHEDULING_STRATEGY: "STRICT_SPREAD"
+  RAY_OP_RESOURCES_STRICT_SPREAD: "1"
+  PYTHONHASHSEED: "0"
+  TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+  CUDA_DEVICE_MAX_CONNECTIONS: "1"
+  SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN: "1"
+  NCCL_DEBUG: "INFO"
+  HYDRA_FULL_ERROR: "1"
+  RAY_ENABLE_OPEN_TELEMETRY: "0"

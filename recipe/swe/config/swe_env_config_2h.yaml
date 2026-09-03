@@ -1,0 +1,15 @@
+environment:
+  cwd: "/testbed"
+  timeout: 240
+  container_timeout: "2h"
+  interpreter: ["bash", "-c"]
+  # Benchmark code is untrusted. Change only on a dedicated, isolated cluster.
+  network_mode: "none"
+  env:
+    PAGER: cat
+    MANPAGER: cat
+    LESS: -R
+    PIP_PROGRESS_BAR: "off"
+    TQDM_DISABLE: "1"
+  enable_lxcfs_cpu_view: true
+  lxcfs_root: "/var/lib/lxcfs"

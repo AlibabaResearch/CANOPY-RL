@@ -1,0 +1,583 @@
+diff --git a/verl/experimental/agent_loop/__init__.py b/verl/experimental/agent_loop/__init__.py
+index 92385b4..aca947e 100644
+--- a/verl/experimental/agent_loop/__init__.py
++++ b/verl/experimental/agent_loop/__init__.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ 
+ from .agent_loop import (
+     AgentLoopBase,
+@@ -22,7 +23,11 @@ from .agent_loop import (
+ from .single_turn_agent_loop import SingleTurnAgentLoop
+ from .tool_agent_loop import ToolAgentLoop
+ 
+-_ = [SingleTurnAgentLoop, ToolAgentLoop]
++# Canopy modification: register the bundled project-specific agent loops.
++from recipe.swe.swe_agent_loop import SWEAgentLoop
++from recipe.appworld.appworld_agent_loop import AppworldAgentLoop
++
++_ = [SingleTurnAgentLoop, ToolAgentLoop, SWEAgentLoop, AppworldAgentLoop]
+ 
+ __all__ = [
+     "AgentLoopBase",
+diff --git a/verl/experimental/agent_loop/agent_loop.py b/verl/experimental/agent_loop/agent_loop.py
+index 268f8d5..d1accd4 100644
+--- a/verl/experimental/agent_loop/agent_loop.py
++++ b/verl/experimental/agent_loop/agent_loop.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ """
+ Agent framework for multi-turn rollout and agentic reinforcement learning.
+ - AgentLoopBase: coroutine based abstract base class for agent loop.
+@@ -501,6 +502,13 @@ class AgentLoopWorker:
+             logprobs=config.calculate_log_probs,
+         )
+ 
++        # Canopy: include the chat-specific stop token in agent-loop sampling.
++        if "stop_token_ids" not in sampling_params and self.tokenizer is not None:
++            # Check for chat-specific stop tokens
++            im_end_id = self.tokenizer.convert_tokens_to_ids("<|im_end|>")
++            if im_end_id is not None:
++                sampling_params["stop_token_ids"] = [im_end_id]
++
+         def apply_greedy_sampling_params(params: dict[str, Any]) -> None:
+             params["top_p"] = 1.0
+             params["top_k"] = -1
+@@ -596,7 +604,10 @@ class AgentLoopWorker:
+                 data_config=DictConfigWrap(self.config.data),
+                 tools=ToolListWrap(self.tools),
+             )
++            # Canopy: expose validation mode to custom agent loops.
++            kwargs["validate"] = trajectory["validate"]
+             output: AgentLoopOutput = await agent_loop.run(sampling_params, **kwargs)
++            del kwargs["validate"]
+             return await self._agent_loop_postprocess(output, trajectory["validate"], **kwargs)
+ 
+     def _pad_token_ids(
+diff --git "a/verl/experimental/fully_async_policy/shell/grpo_qwen3_235b_megatron_npu.sh\342\200\216" b/verl/experimental/fully_async_policy/shell/grpo_qwen3_235b_megatron_npu.sh
+similarity index 100%
+rename from "verl/experimental/fully_async_policy/shell/grpo_qwen3_235b_megatron_npu.sh\342\200\216"
+rename to verl/experimental/fully_async_policy/shell/grpo_qwen3_235b_megatron_npu.sh
+diff --git a/verl/trainer/runtime_env.yaml b/verl/trainer/runtime_env.yaml
+index 7d38fdd..df6a33e 100644
+--- a/verl/trainer/runtime_env.yaml
++++ b/verl/trainer/runtime_env.yaml
+@@ -1,7 +1,11 @@
++# Canopy modification: runtime environment used by the bundled multi-node jobs.
+ working_dir: ./
+-excludes: ["/.git/"]
++excludes: ["/.git/", "/.github/", "/outputs/", "/logs/"]
+ env_vars:
+   TORCH_NCCL_AVOID_RECORD_STREAMS: "1"
+   CUDA_DEVICE_MAX_CONNECTIONS: "1"
++  SGLANG_ALLOW_OVERWRITE_LONGER_CONTEXT_LEN: "1"
++  NCCL_DEBUG: "INFO"
++  HYDRA_FULL_ERROR: "1"
+   HCCL_HOST_SOCKET_PORT_RANGE: "auto"
+-  HCCL_NPU_SOCKET_PORT_RANGE: "auto"
+\ No newline at end of file
++  HCCL_NPU_SOCKET_PORT_RANGE: "auto"
+diff --git a/verl/utils/megatron/router_replay_patch.py b/verl/utils/megatron/router_replay_patch.py
+index 012ab3f..87bcb63 100644
+--- a/verl/utils/megatron/router_replay_patch.py
++++ b/verl/utils/megatron/router_replay_patch.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ import inspect
+ import types
+ import warnings
+@@ -129,6 +130,129 @@ class RouterReplay:
+             router.clear_router_replay_action()
+ 
+ 
++def rebuild_router_replay_registry(model_chunks, expected_layer_numbers=None):
++    """Bind the process-global replay registry to routers in the final live model tree.
++
++    Some model providers construct a temporary decoder and replace it later.  The
++    constructor-time registry then contains replay controllers for orphaned routers
++    that never participate in forward.  Rebuilding from the final module tree keeps
++    the existing router/controller objects while dropping those stale entries.
++
++    Args:
++        model_chunks: A module or an ordered sequence of pipeline/VPP model chunks.
++        expected_layer_numbers: Optional expected one-based MoE layer numbers for
++            each pipeline/VPP chunk.
++
++    Returns:
++        A dictionary with raw, active, per-chunk counts, and active layer numbers.
++
++    Raises:
++        RuntimeError: If the live tree is malformed or does not match the expected
++            pipeline/VPP-local MoE layout.
++    """
++    if isinstance(model_chunks, torch.nn.Module):
++        chunks = [model_chunks]
++    else:
++        try:
++            chunks = list(model_chunks)
++        except TypeError as exc:
++            raise RuntimeError("Router Replay model_chunks must be a module or an iterable of modules.") from exc
++
++    if not chunks:
++        raise RuntimeError("Router Replay cannot bind an empty model chunk list.")
++
++    if expected_layer_numbers is not None:
++        expected_layer_numbers = [list(layer_numbers) for layer_numbers in expected_layer_numbers]
++        if len(expected_layer_numbers) != len(chunks):
++            raise RuntimeError(
++                "Router Replay expected-layer layout does not match model chunks: "
++                f"expected_layers={expected_layer_numbers}, chunks={len(chunks)}."
++            )
++
++    raw_count = len(RouterReplay.router_instances)
++    active_replays = []
++    active_layer_numbers = []
++    chunk_counts = []
++    seen_router_ids = set()
++    replay_owners = {}
++
++    for chunk_idx, chunk in enumerate(chunks):
++        if not isinstance(chunk, torch.nn.Module):
++            raise RuntimeError(
++                f"Router Replay chunk {chunk_idx} is not a torch.nn.Module: {type(chunk).__name__}."
++            )
++
++        chunk_entries = []
++        for module_name, module in chunk.named_modules():
++            if not isinstance(module, TopKRouter) or getattr(module, "is_mtp_layer", False):
++                continue
++
++            router_id = id(module)
++            if router_id in seen_router_ids:
++                continue
++            seen_router_ids.add(router_id)
++
++            replay = getattr(module, "router_replay", None)
++            if not isinstance(replay, RouterReplay):
++                raise RuntimeError(
++                    "A live TopKRouter has no Verl RouterReplay controller: "
++                    f"chunk={chunk_idx}, module={module_name}, controller={type(replay).__name__}."
++                )
++
++            owner = replay_owners.get(id(replay))
++            if owner is not None:
++                raise RuntimeError(
++                    "Two live TopKRouter modules share one RouterReplay controller: "
++                    f"first={owner}, second=chunk{chunk_idx}:{module_name}."
++                )
++            replay_owners[id(replay)] = f"chunk{chunk_idx}:{module_name}"
++
++            layer_number = getattr(module, "layer_number", None)
++            if layer_number is None:
++                raise RuntimeError(
++                    "A live TopKRouter has no layer_number, so replay order is ambiguous: "
++                    f"chunk={chunk_idx}, module={module_name}."
++                )
++            chunk_entries.append((int(layer_number), module_name, replay))
++
++        chunk_entries.sort(key=lambda entry: entry[0])
++        layer_numbers = [entry[0] for entry in chunk_entries]
++        if len(layer_numbers) != len(set(layer_numbers)):
++            raise RuntimeError(
++                f"Router Replay found duplicate layer numbers in chunk {chunk_idx}: {layer_numbers}."
++            )
++
++        actual_count = len(chunk_entries)
++        if expected_layer_numbers is not None and layer_numbers != expected_layer_numbers[chunk_idx]:
++            raise RuntimeError(
++                "Router Replay live-layer layout mismatch: "
++                f"chunk={chunk_idx}, active={actual_count}, actual_layers={layer_numbers}, "
++                f"expected_layers={expected_layer_numbers[chunk_idx]}, raw_registry={raw_count}."
++            )
++
++        chunk_counts.append(actual_count)
++        active_layer_numbers.append(layer_numbers)
++        active_replays.extend(entry[2] for entry in chunk_entries)
++
++    if not active_replays:
++        raise RuntimeError(
++            f"Router Replay is enabled but the final model tree contains no live TopKRouter (raw={raw_count})."
++        )
++
++    for replay in active_replays:
++        replay.clear_indices()
++        replay.clear_router_replay_action()
++
++    # Replace in place so any compatibility references to this list remain valid.
++    RouterReplay.router_instances[:] = active_replays
++    return {
++        "raw_count": raw_count,
++        "active_count": len(active_replays),
++        "chunk_counts": chunk_counts,
++        "layer_numbers": active_layer_numbers,
++    }
++
++
+ def _patched_topk_routing_with_score_function(
+     logits: torch.Tensor,
+     topk: int,
+diff --git a/verl/utils/model.py b/verl/utils/model.py
+index c621eb1..bd928c4 100644
+--- a/verl/utils/model.py
++++ b/verl/utils/model.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ """
+ Utilities to create common models from huggingface
+ """
+@@ -73,14 +74,23 @@ def squeeze(x):
+ 
+ 
+ def update_model_config(module_config, override_config_kwargs):
+-    """Update the module config with the override_config_kwargs.
+-    Args:
+-        module_config: The module config from Huggingface Transformers.
+-        override_config_kwargs: The kwargs to override the module config.
++    """Recursively apply overrides to object- or dict-backed model configs.
++
++    Modified by Canopy to support nested dictionary configuration objects.
+     """
+     for key, val in override_config_kwargs.items():
+-        if isinstance(val, dict):
+-            update_model_config(getattr(module_config, key), val)
++        if isinstance(module_config, dict):
++            current = module_config.get(key)
++            if isinstance(val, dict) and isinstance(current, dict):
++                update_model_config(current, val)
++            else:
++                module_config[key] = val
++        elif isinstance(val, dict):
++            current = getattr(module_config, key, None)
++            if current is None:
++                setattr(module_config, key, val)
++            else:
++                update_model_config(current, val)
+         else:
+             setattr(module_config, key, val)
+ 
+diff --git a/verl/utils/net_utils.py b/verl/utils/net_utils.py
+index 0c6ee35..a13692d 100644
+--- a/verl/utils/net_utils.py
++++ b/verl/utils/net_utils.py
+@@ -24,8 +24,11 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
++import errno
+ import ipaddress
+ import socket
++from collections.abc import Iterable
+ 
+ 
+ def is_ipv4(ip_str: str) -> bool:
+@@ -74,10 +77,10 @@ def get_free_port(address: str, with_alive_sock: bool = False) -> tuple[int, soc
+     """Find a free port on the given address.
+ 
+     By default the socket is closed internally, suitable for immediate use.
+-    Set with_alive_sock=True to keep the socket open as a port reservation,
+-    preventing other calls from getting the same port. The caller is
+-    responsible for closing the socket before the port is actually bound
+-    by the target service (e.g. NCCL, uvicorn).
++    Set with_alive_sock=True to keep the bound socket open as a lightweight
++    reservation. The caller is responsible for closing the socket before the
++    port is actually bound by the target service (e.g. NCCL, uvicorn). Use
++    ``reserve_port`` when an exclusive listening reservation is required.
+     """
+     family = socket.AF_INET6 if is_valid_ipv6_address(address) else socket.AF_INET
+ 
+@@ -89,3 +92,35 @@ def get_free_port(address: str, with_alive_sock: bool = False) -> tuple[int, soc
+         return port, sock
+     sock.close()
+     return port, None
++
++
++def reserve_port(address: str, candidate_ports: Iterable[int]) -> tuple[int, socket.socket]:
++    """Exclusively reserve the first available TCP endpoint in ``candidate_ports``.
++
++    Unlike ``get_free_port(..., with_alive_sock=True)``, this helper enters the
++    listening state and does not enable ``SO_REUSEADDR``. It is intended for a
++    service that must close the reservation immediately before starting the
++    real listener.
++    """
++
++    family = socket.AF_INET6 if is_valid_ipv6_address(address) else socket.AF_INET
++    attempted: list[int] = []
++    last_error: OSError | None = None
++    for candidate in candidate_ports:
++        if not 0 <= candidate <= 65535:
++            raise ValueError(f"Port must be between 0 and 65535, got {candidate}")
++        attempted.append(candidate)
++        sock = socket.socket(family=family, type=socket.SOCK_STREAM)
++        try:
++            sock.bind((address, candidate))
++            sock.listen(1)
++            return sock.getsockname()[1], sock
++        except OSError as error:
++            sock.close()
++            if error.errno != errno.EADDRINUSE:
++                raise
++            last_error = error
++
++    raise RuntimeError(
++        f"No reservable TCP port on {address}; attempted {attempted}"
++    ) from last_error
+diff --git a/verl/utils/transferqueue_utils.py b/verl/utils/transferqueue_utils.py
+index c16476c..a1a1831 100644
+--- a/verl/utils/transferqueue_utils.py
++++ b/verl/utils/transferqueue_utils.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ 
+ import asyncio
+ import copy
+@@ -54,7 +55,8 @@ except ImportError:
+             def _raise(*args, **kwargs):
+                 raise RuntimeError(
+                     f"transfer_queue is not installed. Cannot use tq.{name}(). "
+-                    "Please install it by calling `pip install TransferQueue==0.1.7`"
++                    # Canopy: align the fallback hint with both current sync entrypoints.
++                    "Please install it by calling `pip install TransferQueue==0.1.6`"
+                 )
+ 
+             return _raise
+diff --git a/verl/workers/engine/megatron/transformer_impl.py b/verl/workers/engine/megatron/transformer_impl.py
+index 25db304..13b623c 100644
+--- a/verl/workers/engine/megatron/transformer_impl.py
++++ b/verl/workers/engine/megatron/transformer_impl.py
+@@ -11,6 +11,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ 
+ import inspect
+ import logging
+@@ -35,9 +36,16 @@ from verl.utils.dataset.dataset_utils import DatasetPadMode
+ from verl.utils.debug import log_gpu_memory_usage
+ from verl.utils.device import get_device_id, get_device_name
+ from verl.utils.megatron.pipeline_parallel import make_batch_generator
+-from verl.utils.megatron.router_replay_patch import RouterReplay, RouterReplayAction, apply_router_replay_patch
++from verl.utils.megatron.router_replay_patch import (
++    RouterReplay,
++    RouterReplayAction,
++    apply_router_replay_patch,
++    rebuild_router_replay_registry,
++)
+ from verl.utils.megatron.router_replay_utils import (
+     RouterReplayHelper,
++    get_current_rank_layer_info,
++    is_moe_layer,
+     merge_router_topk_indices,
+     pp_gather,
+     reorder_and_merge_vpp_layers,
+@@ -319,7 +327,7 @@ class MegatronEngine(BaseEngine):
+             print_model_size(module[0])
+ 
+         if self.enable_routing_replay:
+-            print(f"routing replay layers: {len(RouterReplay.router_instances)}")
++            print(f"routing replay registry before live rebind: raw={len(RouterReplay.router_instances)}")
+ 
+         return module
+ 
+@@ -397,6 +405,38 @@ class MegatronEngine(BaseEngine):
+             for model in self.module:
+                 patch_postprocess(model)
+ 
++        if self.enable_routing_replay:
++            vp_size = self.tf_config.virtual_pipeline_model_parallel_size
++            expected_chunks = 1 if vp_size is None else vp_size
++            if len(self.module) != expected_chunks:
++                raise RuntimeError(
++                    "Router Replay VPP layout mismatch: "
++                    f"model_chunks={len(self.module)}, expected_chunks={expected_chunks}."
++                )
++
++            expected_layer_numbers = []
++            for vp_stage in range(expected_chunks):
++                local = get_current_rank_layer_info(self.tf_config, None if vp_size is None else vp_stage)
++                expected_layer_numbers.append(
++                    [
++                        layer_idx + 1
++                        for layer_idx in range(local["start"], local["end"])
++                        if is_moe_layer(self.tf_config, layer_idx)
++                    ]
++                )
++
++            registry_info = rebuild_router_replay_registry(
++                self.module, expected_layer_numbers=expected_layer_numbers
++            )
++            print(
++                "routing replay registry rebound: "
++                f"pp_rank={mpu.get_pipeline_model_parallel_rank()}, "
++                f"raw={registry_info['raw_count']}, active={registry_info['active_count']}, "
++                f"expected={sum(len(layers) for layers in expected_layer_numbers)}, "
++                f"chunks={registry_info['chunk_counts']}, "
++                f"layers={registry_info['layer_numbers']}"
++            )
++
+         # For forward_only, we don't need optimizer, lr_scheduler, checkpoint_mananager
+         if self.engine_config.forward_only:
+             self.optimizer = None
+diff --git a/verl/workers/rollout/sglang_rollout/async_sglang_server.py b/verl/workers/rollout/sglang_rollout/async_sglang_server.py
+index 2bef78a..1b49093 100644
+--- a/verl/workers/rollout/sglang_rollout/async_sglang_server.py
++++ b/verl/workers/rollout/sglang_rollout/async_sglang_server.py
+@@ -12,6 +12,7 @@
+ # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ # See the License for the specific language governing permissions and
+ # limitations under the License.
++# Modified by CANOPY contributors in 2026; see patches/verl-canopy.patch.
+ import asyncio
+ import dataclasses
+ import json
+@@ -27,28 +28,24 @@ import sglang.srt.entrypoints.engine
+ import torch
+ from packaging import version
+ from ray.actor import ActorHandle
+-from sglang.srt.entrypoints.http_server import (
+-    ServerArgs,
+-    _GlobalState,
+-    app,
+-    set_global_state,
+-)
+-from sglang.srt.managers.io_struct import (
+-    ContinueGenerationReqInput,
+-    GenerateReqInput,
+-    PauseGenerationReqInput,
+-    ReleaseMemoryOccupationReqInput,
+-    ResumeMemoryOccupationReqInput,
+-)
++from sglang.srt.entrypoints.http_server import (ServerArgs, _GlobalState, app,
++                                                set_global_state)
++from sglang.srt.managers.io_struct import (ContinueGenerationReqInput,
++                                           GenerateReqInput,
++                                           PauseGenerationReqInput,
++                                           ReleaseMemoryOccupationReqInput,
++                                           ResumeMemoryOccupationReqInput)
+ from sglang.srt.managers.tokenizer_manager import ServerStatus
+ 
+ from verl.utils.config import omega_conf_to_dataclass
+ from verl.utils.device import get_visible_devices_keyword
+-from verl.utils.net_utils import get_free_port, is_valid_ipv6_address
++from verl.utils.net_utils import get_free_port, is_valid_ipv6_address, reserve_port
+ from verl.utils.profiler import DistProfiler, build_sglang_profiler_args
+ from verl.workers.config import HFModelConfig, RolloutConfig
+-from verl.workers.rollout.replica import RolloutMode, RolloutReplica, TokenOutput
+-from verl.workers.rollout.sglang_rollout.sglang_rollout import _set_envs_and_config
++from verl.workers.rollout.replica import (RolloutMode, RolloutReplica,
++                                          TokenOutput)
++from verl.workers.rollout.sglang_rollout.sglang_rollout import \
++    _set_envs_and_config
+ from verl.workers.rollout.sglang_rollout.utils import SGLANG_LORA_NAME
+ from verl.workers.rollout.utils import get_max_position_embeddings, run_uvicorn
+ 
+@@ -199,6 +196,8 @@ class SGLangHttpServer:
+         self._master_address = None
+         self._master_port = None
+         self._master_sock = None
++        self._nccl_port = None
++        self._nccl_sock = None
+         if self.nnodes > 1 and self.node_rank == 0:
+             self._master_address = self._server_address
+             self._master_port, self._master_sock = get_free_port(self._server_address, with_alive_sock=True)
+@@ -206,11 +205,47 @@ class SGLangHttpServer:
+                 f"SGLangHttpServer, replica_rank: {self.replica_rank}, "
+                 f"master address: {self._master_address}, port: {self._master_port}"
+             )
++        elif self.nnodes == 1 and os.environ.get("VERL_SGLANG_RESERVE_NCCL_PORT", "0") == "1":
++            # SGLang closes its ephemeral-port probe long before TCPStore binds.
++            # Under a 32-replica startup storm that port can be reused. Reserve
++            # a per-replica port below Linux's default ephemeral range, on the
++            # wildcard address TCPStore actually listens on. Multiple candidate
++            # bands allow a new job to coexist briefly with actors being reaped
++            # from the previous job.
++            port_base = int(os.environ.get("VERL_SGLANG_NCCL_PORT_BASE", "20000"))
++            port_stride = int(os.environ.get("VERL_SGLANG_NCCL_PORT_STRIDE", "512"))
++            port_attempts = int(os.environ.get("VERL_SGLANG_NCCL_PORT_ATTEMPTS", "16"))
++            if port_stride <= 0 or port_attempts <= 0:
++                raise ValueError(
++                    "VERL_SGLANG_NCCL_PORT_STRIDE and "
++                    "VERL_SGLANG_NCCL_PORT_ATTEMPTS must both be positive"
++                )
++            if not 0 <= self.replica_rank < port_stride:
++                raise ValueError(
++                    f"replica_rank must be in [0, {port_stride}) for deterministic "
++                    f"single-node NCCL port allocation, got {self.replica_rank}"
++                )
++            candidate_ports = (
++                port_base + self.replica_rank + attempt * port_stride
++                for attempt in range(port_attempts)
++            )
++            self._nccl_port, self._nccl_sock = reserve_port("0.0.0.0", candidate_ports)
++            logger.info(
++                f"SGLangHttpServer, replica_rank: {self.replica_rank}, "
++                f"reserved single-node NCCL port: {self._nccl_port}"
++            )
+ 
+     def get_master_address(self):
+         """Get master address and port for init NCCL process group."""
+         return self._master_address, self._master_port
+ 
++    def _release_nccl_port_reservation(self) -> None:
++        """Release the single-node TCPStore reservation, if still held."""
++
++        if self._nccl_sock is not None:
++            self._nccl_sock.close()
++            self._nccl_sock = None
++
+     def get_server_address(self):
+         """Get http server address and port."""
+         assert self._server_port is not None, "http server is not launched, port is None"
+@@ -328,6 +363,8 @@ class SGLangHttpServer:
+                 else f"{self._master_address}:{self._master_port}"
+             )
+             args["dist_init_addr"] = dist_init_addr
++        elif self._nccl_port is not None:
++            args["nccl_port"] = self._nccl_port
+ 
+         if self.config.prometheus.enable:
+             if self.config.prometheus.served_model_name:
+@@ -383,10 +420,15 @@ class SGLangHttpServer:
+         # https://github.com/sgl-project/sglang/blob/main/python/sglang/srt/entrypoints/http_server.py
+         sglang.srt.entrypoints.engine._set_envs_and_config = _set_envs_and_config
+         os.environ["SGLANG_BLOCK_NONZERO_RANK_CHILDREN"] = "0"
+-        server_args = ServerArgs(**args)
++        try:
++            server_args = ServerArgs(**args)
++        except BaseException:
++            self._release_nccl_port_reservation()
++            raise
++        self._release_nccl_port_reservation()
+         # For SGLang main branch or version >= 0.5.10
+         # The latest main branch of SGLang has wrapped the _launch_subprocesses function inside the Engine class
+-        if version.parse(sglang.__version__) >= version.parse("0.5.10"):
++        if version.parse(sglang.__version__) >= version.parse("0.5.9"):
+             from sglang.srt.entrypoints.http_server import Engine
+ 
+             self.tokenizer_manager, self.template_manager, self.scheduler_info, *_ = Engine._launch_subprocesses(
+@@ -642,7 +684,8 @@ class SGLangHttpServer:
+             if self.config.skip_tokenizer_init:
+                 routed_experts = output.get("meta_info", {}).get("routed_experts", None)
+             else:
+-                from sglang.srt.layers.moe.routed_experts_capturer import extract_routed_experts_from_meta_info
++                from sglang.srt.layers.moe.routed_experts_capturer import \
++                    extract_routed_experts_from_meta_info
+ 
+                 hf_config = self.model_config.hf_config
+                 if not hasattr(hf_config, "num_hidden_layers") or not hasattr(hf_config, "num_experts_per_tok"):

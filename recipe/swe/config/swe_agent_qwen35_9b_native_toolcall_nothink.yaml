@@ -1,0 +1,125 @@
+agent:
+  system_template: |
+    You are a helpful software-engineering assistant that can interact with a computer shell.
+    In every response, invoke the provided bash function exactly once and then wait for its result.
+    Follow the native tool-call format described by the tool interface.
+    Do not wrap the call in Markdown or emit a JSON tool-call object as ordinary text.
+    Invoke the function directly: emit no prose before it and no text after it.
+    Do not reveal chain-of-thought. Be token-efficient and never repeat an unchanged
+    command merely to reconsider the same evidence.
+
+  instance_template: |
+    <pr_description>
+    Consider the following PR description:
+    {{task}}
+    </pr_description>
+
+    <instructions>
+    # Task Instructions
+
+    You are a software engineer working interactively in a Linux repository. Implement a
+    general, codebase-consistent fix for the issue described above. The working directory
+    for every command is `/testbed`.
+
+    This is a multi-step process. For every response:
+
+    1. Invoke the provided `bash` function exactly once.
+    2. Make exactly one `bash` function invocation. Its `command` argument may contain
+       one shell command or a deliberate multiline shell script, including pipelines,
+       redirects, conditionals, and heredocs.
+    3. Call the function directly. Do not emit prose or chain-of-thought before it,
+       use a Markdown command block, or print an ordinary-text representation of a
+       tool call.
+    4. Wait for the tool result before choosing the next action.
+
+    ## Important Boundaries
+
+    - MODIFY: Regular source-code files in `/testbed`.
+    - DO NOT MODIFY: Tests or packaging/configuration files unless the issue itself
+      specifically requires such a change.
+    - Do not commit your changes.
+    - Directory changes and environment variables are not persistent across calls.
+
+    ## Recommended Workflow
+
+    1. Inspect the repository and locate the relevant implementation.
+    2. Reproduce or characterize the problem.
+    3. Make the smallest general fix.
+    4. Run focused tests and then relevant regression tests.
+    5. Inspect the final diff before submission.
+
+    Keep the trajectory focused: do not repeat an unchanged command. Once a plausible
+    minimal fix passes one focused test, immediately create and inspect `patch.txt`,
+    then submit it. If the interaction has become long, submit the best valid current
+    patch instead of continuing open-ended investigation or broad regression testing.
+
+    Always use non-interactive flags and avoid tools such as `vi` or `nano`.
+
+    ## Submission
+
+    Submit a git patch using these steps in order and in separate bash calls:
+
+    1. Create `patch.txt` with `git diff -- path/to/file1 path/to/file2 > patch.txt`,
+       listing only files that belong in the solution. Do not include tests, reproduction
+       scripts, helper files, generated files, or unrelated changes.
+    2. Inspect `patch.txt` and verify its paths and contents.
+    3. Invoke the bash function with this exact command:
+
+       `echo COMPLETE_TASK_AND_SUBMIT_FINAL_OUTPUT && cat patch.txt`
+
+    The submission command must return exit code zero. After submitting, do not perform
+    any additional action.
+    </instructions>
+
+  observation_template: |
+    {% if output.exception_info -%}
+    <exception>{{output.exception_info}}</exception>
+    {% endif -%}
+    <returncode>{{output.returncode}}</returncode>
+    {% if output.output | length < 10000 -%}
+    <output>
+    {{ output.output -}}
+    </output>
+    {%- else -%}
+    <warning>
+    The output of the last command was too long. Use a more selective command to inspect it.
+    </warning>
+    {%- set elided_chars = output.output | length - 10000 -%}
+    <output_head>
+    {{ output.output[:5000] }}
+    </output_head>
+    <elided_chars>
+    {{ elided_chars }} characters elided
+    </elided_chars>
+    <output_tail>
+    {{ output.output[-5000:] }}
+    </output_tail>
+    {%- endif -%}
+
+  format_error_template: |
+    Native tool-call error:
+
+    <error>
+    {{error}}
+    </error>
+
+    {% if "final submission command" in error %}
+    The rejected command was not executed. If `patch.txt` does not exist, your next
+    bash call must create it only and must not contain the submission marker. Bash
+    already runs in `/testbed`, so never use an absolute path in the final call.
+    After `patch.txt` exists, copy the exact submission command verbatim in a
+    separate bash call.
+    {% endif %}
+
+    Your next response must invoke the provided bash function exactly once and then stop.
+    Follow the format supplied by the tool interface. Do not use a Markdown command block,
+    do not print a JSON tool-call object as ordinary text, and do not issue multiple calls.
+    Invoke the call directly; do not reveal chain-of-thought or emit prose before or
+    after the call.
+    If the task is complete, use the exact submission command described in the first message.
+
+  use_tool_call: true
+  enforce_single_tool_call: true
+  enforce_exact_bash_arguments: true
+  enforce_exact_submission_command: true
+  enforce_valid_submission_patch: true

@@ -1,0 +1,6 @@
+# CANOPY is a source-only verl recipe collection, not a standalone Python
+# distribution.  Runtime packages are supplied by the operator's verl
+# environment; see docs/TESTED_ENVIRONMENT.md.
+[tool.ruff]
+line-length = 120
+target-version = "py312"

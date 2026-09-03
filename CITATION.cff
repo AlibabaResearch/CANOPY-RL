@@ -1,0 +1,41 @@
+cff-version: 1.2.0
+message: "If you use CANOPY, please cite the software and the associated paper."
+title: "CANOPY: Coverage-Anchored On-Policy RL"
+type: software
+version: 0.1.0
+date-released: 2026-09-03
+authors:
+  - family-names: "Pu"
+    given-names: "Liming"
+  - family-names: "Li"
+    given-names: "Xiaoxia"
+  - family-names: "Liu"
+    given-names: "Yifu"
+  - family-names: "Cao"
+    given-names: "Teng"
+  - family-names: "Yang"
+    given-names: "Bin"
+repository-code: "https://github.com/AlibabaResearch/SignalCoverageRL"
+url: "https://github.com/AlibabaResearch/SignalCoverageRL"
+license: Apache-2.0
+abstract: >-
+  Reference implementation and reproducibility recipes for CANOPY, a
+  coverage-anchored on-policy reinforcement-learning protocol for long-horizon
+  interactive LLM agents.
+preferred-citation:
+  type: article
+  title: "Explore More, Drift Less: Outcome-Only Reinforcement Learning Can Suffice for Long-Horizon Interactive Agents"
+  authors:
+    - family-names: "Pu"
+      given-names: "Liming"
+    - family-names: "Li"
+      given-names: "Xiaoxia"
+    - family-names: "Liu"
+      given-names: "Yifu"
+    - family-names: "Cao"
+      given-names: "Teng"
+    - family-names: "Yang"
+      given-names: "Bin"
+  year: 2026
+  doi: "10.48550/arXiv.2609.01245"
+  url: "https://arxiv.org/abs/2609.01245"

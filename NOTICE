@@ -1,0 +1,13 @@
+CANOPY
+Copyright 2026 Alibaba Group Holding Limited
+
+This product includes software developed by third parties. Their copyright,
+license, source, version, and modification information is recorded in
+THIRD_PARTY_NOTICES.md and THIRD_PARTY_COMPONENTS.yml. Complete license texts
+for source portions redistributed or modified by this project are retained in
+THIRD_PARTY_LICENSES/.
+
+CANOPY includes a modified snapshot of the upstream `verl/` Python package
+source and an audit patch describing the project delta. The upstream Verl
+notice is retained at
+THIRD_PARTY_LICENSES/verl/Notice.txt.

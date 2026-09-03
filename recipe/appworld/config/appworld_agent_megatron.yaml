@@ -1,0 +1,55 @@
+hydra:
+  searchpath:
+    - "file://${oc.env:VERL_ROOT,.}/verl/trainer/config"
+
+defaults:
+  - ppo_megatron_trainer
+  - _self_
+
+trainer:
+  # Directory for logging rollout data; no dump if null
+  rollout_data_dir: null
+  # Directory for logging validation data; no dump if null
+  validation_data_dir: null
+
+
+data:
+  max_prompt_length: 1024
+  max_response_length: 1024
+  train_batch_size: 256
+  val_batch_size: 256
+  return_raw_chat: true
+
+actor_rollout_ref:
+  hybrid_engine: true
+  rollout:
+    name: sglang
+    mode: async
+    agent:
+      num_workers: 8
+    multi_turn:
+      enable: true
+      max_assistant_turns: 30
+      max_tool_response_length: 4096
+  appworld_custom_config:
+    # The launcher writes one or more endpoint lists to this directory.
+    server_url_config_folder: ${oc.env:APPWORLD_SERVER_URL_DIR,./runtime/appworld_urls}
+    sparse_reward: true
+    # Maximum generated tokens in one assistant turn (not the full trajectory).
+    max_completion_tokens: 2048
+    max_env_timeout_turn: 2
+    # Keep null/true for training. Evaluation launchers may override both fields
+    # to retain AppWorld output bundles under an allowed output root.
+    experiments_outputs_directory: null
+    rm_outdir_after_finished: true
+
+
+  actor:
+    megatron:
+      vanilla_mbridge: false
+      use_mbridge: true
+    
+  ref:
+    megatron:
+      vanilla_mbridge: false
+      use_mbridge: true

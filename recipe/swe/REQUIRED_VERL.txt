@@ -1,0 +1,11 @@
+# CANOPY SWE recipe: audited reproduction commit and porting boundary.
+UPSTREAM=https://github.com/verl-project/verl.git
+MODE=reproduction_commit
+REPRODUCTION_COMMIT=19c6af5de10de2b5272c83c0e82aa715c8c621f3
+REPRODUCTION_DESCRIBE=v0.8.0-11-g19c6af5d
+BUNDLED_SOURCE=../../verl
+PATCH=../../patches/verl-canopy.patch
+PATCH_APPLIES_TO=19c6af5de10de2b5272c83c0e82aa715c8c621f3
+ROLLING_BRANCH=main
+ROLLING_COMPATIBILITY=best-effort-unverified
+NOTES=No rolling commit is currently claimed as verified. Port this synchronous recipe only after internal-API and runtime validation; do not apply the reproduction patch blindly.

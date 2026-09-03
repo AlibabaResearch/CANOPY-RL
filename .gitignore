@@ -1,0 +1,39 @@
+# Local environments and dependencies
+/.venv/
+/.deps/
+.env
+.env.*
+!.env.example
+
+# Runtime data and outputs are never part of the public source release
+/data/
+/verl_data/
+/runtime/
+/outputs/
+/logs/
+/release/
+*.parquet
+*.bundle
+*.ckpt
+*.pt
+*.pth
+*.safetensors
+
+# Python and test artifacts
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+build/
+dist/
+
+# Editors and operating systems
+.DS_Store
+._*
+.idea/
+.vscode/
+*~
+*.bak
+*.swp
