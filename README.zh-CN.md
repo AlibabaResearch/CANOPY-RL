@@ -8,6 +8,10 @@ CANOPY（Coverage-ANchored On-PolicY RL）提供面向长时程交互式 LLM Age
 for Long-Horizon Interactive Agents”](https://arxiv.org/abs/2609.01245)
 （arXiv:2609.01245）。目前涵盖 AppWorld 和 SWE 类软件工程环境。
 
+2026 年 2 月，CANOPY 训练的 Qwen3-14B 在公开的 AppWorld Leaderboard
+（<https://appworld.dev/appworld/leaderboard>）上达到 SOTA（此后已被更新的
+闭源模型超过）。
+
 这是面向现有多节点 Verl/Ray/GPU 栈的源码发布，不是独立 Python 包或单机
 Quickstart。
 
